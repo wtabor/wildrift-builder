@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { champions, getBuilds, getChampion, getItem, CURRENT_PATCH, provenanceFor } from "@/lib/data";
+import { champions, getBuilds, getChampion, getItem, CURRENT_PATCH, latestProvenanceStamp } from "@/lib/data";
 import { computeBuild, MAX_LEVEL } from "@/lib/stats/engine";
 import { formatGold } from "@/lib/format";
 import { statRows } from "@/lib/statDisplay";
@@ -84,6 +84,14 @@ export default async function ChampionPage({ params }: Props) {
   // attack speed properly. `championBaseAtLevel().attackSpeed` is the *bonus
   // ratio* (+47%), not attacks/sec — reading it as a final value understates
   // level 15 as lower than level 1.
+  // Covers every stat the base-stats table renders (the growth rows plus the
+  // flat move-speed row), so the "last changed" line under it speaks for the
+  // whole table instead of whichever single row we happened to sample.
+  const baseStatPatch = latestProvenanceStamp(c.provenance, [
+    ...GROWTH_ROWS.map((r) => r.key),
+    "moveSpeed",
+  ]);
+
   const at1 = computeBuild(c, 1, []);
   const at15 = computeBuild(c, MAX_LEVEL, []);
   const lvl1 = at1.stats;
@@ -209,7 +217,13 @@ export default async function ChampionPage({ params }: Props) {
         </table>
       </div>
       <p className="mt-3 font-mono text-[11px] tracking-wider text-[#8b8f9a]">
-        BASE STATS LAST CHANGED: PATCH {provenanceFor(c.provenance, "maxHealth")}
+        {/* Summarises the WHOLE table, so it has to consider every base-stat key
+            — keying off maxHealth alone reported "no change" for a champion
+            whose armor moved this patch. Unstamped values are carried forward,
+            not changed, so they get the weaker wording. See provenanceFor. */}
+        {baseStatPatch
+          ? `BASE STATS LAST CHANGED: PATCH ${baseStatPatch}`
+          : `BASE STATS: NO CHANGE ON RECORD — ACCURATE AS OF PATCH ${CURRENT_PATCH}`}
       </p>
 
       {/* ── Level 15 summary ──────────────────────────────────────────── */}

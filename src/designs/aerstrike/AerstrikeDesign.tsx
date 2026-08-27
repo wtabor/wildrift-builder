@@ -431,7 +431,10 @@ function Portrait({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={src}
-          alt={name}
+          /* Decorative: the initials underneath are the accessible label, and a
+             real alt would paint its text over them while the image is loading
+             or if it 404s. */
+          alt=""
           width={size}
           height={size}
           loading="lazy"

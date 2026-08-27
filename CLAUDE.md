@@ -63,7 +63,7 @@ never re-implement formatting in a component. See `DESIGN_WORKFLOW.md` for UI it
 
 - Adding/updating champions or items: use the `/add-entity` skill — it bundles the schema shape,
   source-priority rule, and the validate gate.
-- Roster is already complete (139 champions / 100 items); new work is patch updates and corrections,
+- Roster is already complete (140 champions / 112 items as of 7.2b); new work is patch updates and corrections,
   not initial fill. Roster progress tracked in `ROSTER.md`.
 - Three Claude-driven GitHub Actions keep data honest and current: `data-verify.yml` (daily audit →
   corrections PR), `patch-watch.yml` (daily → rolls the dataset forward one patch per PR toward the

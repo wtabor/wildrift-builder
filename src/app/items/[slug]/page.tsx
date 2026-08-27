@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { items, getItem, CURRENT_PATCH, provenanceFor } from "@/lib/data";
+import { items, getItem, CURRENT_PATCH, provenanceFor, hasProvenanceStamp } from "@/lib/data";
 import { goldEfficiency } from "@/lib/stats/engine";
 import { itemStatLines } from "@/lib/statDisplay";
 import { formatGold } from "@/lib/format";
@@ -87,7 +87,10 @@ export default async function ItemPage({ params }: Props) {
           <p className="font-mono text-sm text-[#ff6b1a]">
             {formatGold(item.cost)} gold
             <span className="ml-2 text-[#8b8f9a]">
-              (last changed: patch {provenanceFor(item.provenance, "cost")})
+              ({hasProvenanceStamp(item.provenance, "cost")
+                ? "last changed"
+                : "no change on record — accurate as of"}
+              : patch {provenanceFor(item.provenance, "cost")})
             </span>
           </p>
         </div>
@@ -129,14 +132,26 @@ export default async function ItemPage({ params }: Props) {
                   <tr key={l.key} className="border-b border-white/5">
                     <td className="py-2 pr-4 text-[#b6bac2]">{l.label}</td>
                     <td className="py-2 pr-4 font-mono font-semibold">+{l.display}</td>
+                    {/* Only an explicit stamp records a change; the baseline
+                        fallback just means "carried forward unchanged". */}
                     <td className="py-2 font-mono text-[#8b8f9a]">
-                      patch {provenanceFor(item.provenance, l.key)}
+                      {hasProvenanceStamp(item.provenance, l.key) ? (
+                        `patch ${provenanceFor(item.provenance, l.key)}`
+                      ) : (
+                        <span title={`No change on record — accurate as of patch ${provenanceFor(item.provenance, l.key)}`}>
+                          —
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <p className="mt-3 font-mono text-[11px] tracking-wider text-[#8b8f9a]">
+            — = NO CHANGE ON RECORD; THE VALUE IS CARRIED FORWARD AND ACCURATE AS OF PATCH{" "}
+            {CURRENT_PATCH}
+          </p>
         </>
       )}
 
