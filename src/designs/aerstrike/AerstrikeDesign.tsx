@@ -41,6 +41,22 @@ const STAT_FILTERS: { key: StatKey; label: string }[] = [
 ];
 
 const ABILITY_SLOTS: Ability["slot"][] = ["passive", "Q", "W", "E", "R"];
+
+/**
+ * How the dataset describes its own confidence, in the ticker and the footer.
+ *
+ * `meta.verified` is true only when a whole patch file was re-checked against a
+ * primary source; it is false today because values carried forward from 7.1g
+ * have not been re-verified. That is NOT the same as the data being demo data —
+ * every value is transcribed from Riot's patch notes and cross-checked against
+ * community references. Labelling that state "SAMPLE" told every visitor the
+ * numbers were placeholders, on a product whose entire pitch is that they
+ * aren't. "SOURCED" is the accurate weaker claim.
+ *
+ * Defined once because the ticker and footer both render it and must never
+ * disagree about how trustworthy the app says it is.
+ */
+const DATA_CONFIDENCE = patchMeta.verified ? "VERIFIED" : "SOURCED";
 const SLOT_LABEL: Record<Ability["slot"], string> = { passive: "P", Q: "Q", W: "W", E: "E", R: "R" };
 
 /* The AerStrike mark — cloud + bolt. Ported from the design system's
@@ -532,7 +548,7 @@ function Ticker({
     ["CHAMPION", champion?.name?.toUpperCase() ?? "—"],
     ["BUILD COST", formatGold(goldCost)],
     ["AUTO DPS", dps ? Math.round(dps.dps).toLocaleString("en-US") : "—"],
-    ["DATA", patchMeta.verified ? "VERIFIED" : "SAMPLE"],
+    ["DATA", DATA_CONFIDENCE],
   ];
   const run = [...stats, ...stats];
   return (
@@ -1678,17 +1694,73 @@ function ChampionGrid({
   canClose: boolean;
   onClose: () => void;
 }) {
-  const filtered = champions.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
+  /*
+   * Sorted by name, not left in file order. champions.json is broadly
+   * alphabetical but not reliably so — champions added in later patches were
+   * appended, which stranded Senna, Thresh, Annie, Aurelion Sol and Bard after
+   * Zyra at the very bottom of a 140-tile grid. The /champions reference page
+   * already sorts; this is the picker catching up.
+   */
+  const filtered = champions
+    .filter((c) => c.name.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  /*
+   * `canClose` distinguishes the two states this component serves. False means
+   * a first visit — the landing page — where a wall of 140 tiles was the entire
+   * page and never said what the app was or why its numbers could be trusted.
+   * True means swapping champion mid-build, where the reader is already sold and
+   * a pitch would just be in the way.
+   */
+  const isLanding = !canClose;
   return (
     <div>
+      {isLanding && (
+        <div className="ae-in mb-9">
+          <div className="ae-eyebrow mb-2">Wild Rift Builder · Patch {patchMeta.patch}</div>
+          <h1 className="max-w-3xl text-[2.6rem] font-bold leading-[0.95] tracking-[-0.03em] text-[var(--ae-fg)]">
+            Real Wild&nbsp;Rift numbers<span className="ae-dot">.</span>
+          </h1>
+          <p className="mt-4 max-w-2xl text-[0.95rem] leading-relaxed text-[var(--ae-fg-dim)]">
+            Stack items, set your level, and watch every total update live — then put two
+            builds side by side and see which actually wins. Wild Rift stats are{" "}
+            <span className="text-[var(--ae-fg)]">not</span> PC League stats, so nothing here is
+            copied from it: every value is transcribed from Riot&apos;s Wild Rift patch notes and
+            cross-checked against community references.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-x-10 gap-y-4">
+            {(
+              [
+                [`${champions.length}`, "champions"],
+                [`${items.length}`, "items"],
+                [patchMeta.patch, "current patch"],
+                [DATA_CONFIDENCE.toLowerCase(), "data"],
+              ] as [string, string][]
+            ).map(([value, label]) => (
+              <div key={label} className="flex flex-col gap-0.5">
+                <span className="font-mono text-xl font-bold text-[var(--ae-accent)]">{value}</span>
+                <span className="ae-eyebrow">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="ae-in mb-6 flex items-end justify-between gap-3">
         <div>
           <div className="ae-eyebrow mb-2">
             Roster
           </div>
-          <h1 className="text-[2.25rem] font-bold leading-[0.95] tracking-[-0.03em] text-[var(--ae-fg)]">
-            Champion select<span className="ae-dot">.</span>
-          </h1>
+          {/* One h1 per page: the landing band above owns it when shown, so the
+              picker heading steps down to h2 rather than competing with it. */}
+          {isLanding ? (
+            <h2 className="text-[2.25rem] font-bold leading-[0.95] tracking-[-0.03em] text-[var(--ae-fg)]">
+              Champion select<span className="ae-dot">.</span>
+            </h2>
+          ) : (
+            <h1 className="text-[2.25rem] font-bold leading-[0.95] tracking-[-0.03em] text-[var(--ae-fg)]">
+              Champion select<span className="ae-dot">.</span>
+            </h1>
+          )}
           <p className="mt-1 text-sm text-[var(--ae-fg-dim)]">Pick a champion to start building.</p>
         </div>
         {canClose && (
@@ -1753,7 +1825,7 @@ function Footer({ patch, query }: { patch: string; query: string }) {
     ["ROSTER", `${champions.length} CHAMPIONS`],
     ["ITEMS", `${items.length} ITEMS`],
     ["PATCH", patch],
-    ["DATA", patchMeta.verified ? "VERIFIED" : "SAMPLE"],
+    ["DATA", DATA_CONFIDENCE],
   ];
   return (
     <footer className="mt-16 border-t border-[var(--ae-border)] pt-10">
