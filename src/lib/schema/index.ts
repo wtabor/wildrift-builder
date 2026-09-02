@@ -140,10 +140,59 @@ export type ItemEffect = z.infer<typeof ItemEffectSchema>;
  * Ability data is captured now (for the Phase 3 damage engine) but unused by the
  * MVP stat panel. Scalings are stored as ratios against a stat (e.g. 0.6 AP).
  */
+/**
+ * What an ability's ratio is measured against.
+ *
+ * The first five are ATTACKER stats. The three `target*` sources are the
+ * defender's health and were added because roughly one champion in five and one
+ * item in four scales off it ("6% of the target's maximum health"), and the
+ * schema had no way to say so — every such value had to be dropped from a patch
+ * roll or, worse, stored against an attacker stat and silently evaluated as the
+ * caster's own health.
+ *
+ * Widening this enum is safe for the frozen snapshots under data/patches/:
+ * adding a member keeps every existing value legal. NARROWING it would not be —
+ * see the `enchant` note on ItemSchema.slot.
+ */
 export const AbilityScalingSchema = z.object({
-  stat: z.enum(["attackDamage", "bonusAttackDamage", "abilityPower", "maxHealth", "bonusHealth"]),
+  stat: z.enum([
+    "attackDamage",
+    "bonusAttackDamage",
+    "abilityPower",
+    "maxHealth",
+    "bonusHealth",
+    /** Fraction of the TARGET's maximum health (Gnar E, Skarner Q, Gwen passive). */
+    "targetMaxHealth",
+    /** Fraction of the TARGET's health right now (Senna passive, Jarvan IV passive). */
+    "targetCurrentHealth",
+    /** Fraction of the health the TARGET is missing (Ekko W, Veigar R). */
+    "targetMissingHealth",
+  ]),
   ratio: z.number(),
 });
+
+/**
+ * A quantity an ability produces that is not damage — a heal, a shield.
+ *
+ * Wild Rift expresses these two ways and the schema has to carry both: most
+ * scale per ABILITY RANK (`byRank: [80, 140, 200, 260]`), but passives have no
+ * ranks and scale on CHAMPION LEVEL instead, which is why `byLevel` exists as a
+ * level-1 → level-15 pair. `OnHitMechanicSchema.flatByLevel` is the same idea
+ * for items, and `lerpByLevel` in the damage engine already interpolates it.
+ *
+ * Both are optional and independent: an ability may be flat (neither), ranked
+ * (`byRank`), level-scaled (`byLevel`), or ratio-only (`scalings`).
+ */
+export const AbilityAmountSchema = z.object({
+  /** Base amount per ability rank, e.g. [80, 140, 200, 260]. */
+  byRank: z.array(z.number()).default([]),
+  /** Base amount interpolated from champion level 1 → 15: [atL1, atL15]. */
+  byLevel: z.tuple([z.number(), z.number()]).optional(),
+  /** Ratios added on top, e.g. 50% AP. */
+  scalings: z.array(AbilityScalingSchema).default([]),
+});
+
+export type AbilityAmount = z.infer<typeof AbilityAmountSchema>;
 
 export const AbilitySchema = z.object({
   slot: z.enum(["passive", "Q", "W", "E", "R"]),
@@ -154,6 +203,56 @@ export const AbilitySchema = z.object({
   damageType: z.enum(["physical", "magic", "true", "none"]).default("none"),
   scalings: z.array(AbilityScalingSchema).default([]),
   cooldown: z.array(z.number()).default([]),
+
+  /* ---- Added so a patch roll can absorb a whole patch note --------------- *
+   *
+   * Riot balances heavily through levers this schema could not express, so
+   * every roll was recorded as "PARTIAL" and the values were dropped: 7.2a
+   * applied 4 of 18 documented changes, 7.2b 15 of 24. Each field below was
+   * added because a specific, real change had nowhere to go.
+   *
+   * All are `.optional()` — never `.default()` — and that distinction is
+   * deliberate. The frozen snapshots under data/patches/ (7.1, 7.2, 7.2a) are
+   * validated by this same schema, so a required field would break ~700 ability
+   * records at once. But a default would be worse than merely unsafe: it would
+   * make "nobody has transcribed this yet" indistinguishable from "this ability
+   * genuinely has no cost". Absent MUST read as unknown, not as zero.
+   *
+   * None of these are read by the stat engine, so adding them cannot move a
+   * number the app already displays. See src/lib/damage/engine.ts for the two
+   * (rawAbilityDamage, mitigatedAbilityDamage) that read them at all.
+   */
+
+  /**
+   * Resource paid per rank, e.g. [65, 75, 85, 95]. Mana for most champions,
+   * energy/fury/grit for others — `ChampionSchema.resourceType` says which.
+   * Absent means "not transcribed", NOT "free to cast".
+   */
+  cost: z.array(z.number()).optional(),
+  /** Health restored (Sona W, Yuumi R, Kayle W). */
+  heal: AbilityAmountSchema.optional(),
+  /** Shield granted (Skarner W, Senna R, Lee Sin W). */
+  shield: AbilityAmountSchema.optional(),
+  /**
+   * Stats the ability grants while active (Nidalee R's AP→armor/MR conversion,
+   * Hecarim Q's move speed, Lee Sin W's omnivamp).
+   *
+   * Reuses StatBlockSchema so no new stat vocabulary is invented. NOTE: this is
+   * situational, conditional data — it is deliberately NOT summed by
+   * `computeBuild`, because a buff that applies only while an ability is active
+   * is not part of a champion's standing totals. Writing one of these values
+   * into `item.stats` instead WOULD move displayed Armor/MR and gold
+   * efficiency; that is the mistake this field exists to prevent.
+   */
+  grants: StatBlockSchema.optional(),
+  /** Incoming damage reduction while active, 0..1 per rank (Garen W, Ambessa R). */
+  damageReduction: z.array(z.number()).optional(),
+  /**
+   * Base damage interpolated from champion level 1 → 15, for abilities that
+   * scale on level rather than rank. 133 of 140 passives are in this shape and
+   * had no home before. Use INSTEAD of `baseDamage`, not alongside it.
+   */
+  baseDamageByLevel: z.tuple([z.number(), z.number()]).optional(),
 });
 
 export type Ability = z.infer<typeof AbilitySchema>;

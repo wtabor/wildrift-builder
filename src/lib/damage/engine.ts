@@ -26,22 +26,96 @@ export interface TargetContext {
   armor: number;
   magicResist: number;
   maxHealth: number;
+  /**
+   * The target's health right now. Defaults to `maxHealth` (the full-health
+   * reference assumption this module already uses for percent-health on-hit).
+   */
+  currentHealth?: number;
+}
+
+/**
+ * Resolve one scaling term against the attacker and, for the `target*` sources,
+ * the defender.
+ *
+ * The target-relative sources are the reason this is a named function rather
+ * than an inline chain: "6% of the target's maximum health" and "6% of my own
+ * maximum health" are wildly different numbers, and conflating them is a silent
+ * wrong answer rather than a visible failure. A `target*` scaling with no target
+ * supplied contributes 0 — the caller is asking for damage in the abstract, and
+ * guessing a target would be worse than declining to.
+ */
+function scalingTerm(
+  stat: Ability["scalings"][number]["stat"],
+  ratio: number,
+  ctx: DamageContext,
+  target?: TargetContext,
+): number {
+  switch (stat) {
+    case "attackDamage":
+      return (ctx.attacker.attackDamage ?? 0) * ratio;
+    case "abilityPower":
+      return (ctx.attacker.abilityPower ?? 0) * ratio;
+    case "maxHealth":
+      return (ctx.attacker.maxHealth ?? 0) * ratio;
+    case "targetMaxHealth":
+      return target ? target.maxHealth * ratio : 0;
+    case "targetCurrentHealth":
+      return target ? (target.currentHealth ?? target.maxHealth) * ratio : 0;
+    case "targetMissingHealth":
+      return target ? (target.maxHealth - (target.currentHealth ?? target.maxHealth)) * ratio : 0;
+    default:
+      // bonusAttackDamage / bonusHealth require base-stat separation — Phase 3.
+      return 0;
+  }
 }
 
 /**
  * Compute the pre-mitigation raw damage of a single ability cast.
+ *
+ * `target` is optional so attacker-only callers are unaffected; without it the
+ * target-relative scalings contribute nothing (see `scalingTerm`).
  * TODO(Phase 3): resolve bonus-stat scalings, on-hit, and item passives.
  */
-export function rawAbilityDamage(ability: Ability, ctx: DamageContext): number {
-  const rankIndex = Math.max(0, Math.min(ctx.abilityRank - 1, ability.baseDamage.length - 1));
-  let dmg = ability.baseDamage[rankIndex] ?? 0;
+export function rawAbilityDamage(
+  ability: Ability,
+  ctx: DamageContext,
+  target?: TargetContext,
+): number {
+  // Level-scaled abilities (most passives, which have no ranks) carry
+  // `baseDamageByLevel` instead of a per-rank array.
+  let dmg: number;
+  if (ability.baseDamageByLevel) {
+    dmg = lerpByLevel(ability.baseDamageByLevel, ctx.level);
+  } else {
+    const rankIndex = Math.max(0, Math.min(ctx.abilityRank - 1, ability.baseDamage.length - 1));
+    dmg = ability.baseDamage[rankIndex] ?? 0;
+  }
   for (const s of ability.scalings) {
-    if (s.stat === "attackDamage") dmg += (ctx.attacker.attackDamage ?? 0) * s.ratio;
-    else if (s.stat === "abilityPower") dmg += (ctx.attacker.abilityPower ?? 0) * s.ratio;
-    else if (s.stat === "maxHealth") dmg += (ctx.attacker.maxHealth ?? 0) * s.ratio;
-    // bonusAttackDamage / bonusHealth require base-stat separation — Phase 3.
+    dmg += scalingTerm(s.stat, s.ratio, ctx, target);
   }
   return dmg;
+}
+
+/**
+ * Resolve a heal or shield amount — the same rank/level/ratio resolution as
+ * damage, minus the damage-type mitigation that does not apply to either.
+ */
+export function abilityAmount(
+  amount: NonNullable<Ability["heal"]>,
+  ctx: DamageContext,
+  target?: TargetContext,
+): number {
+  let total: number;
+  if (amount.byLevel) {
+    total = lerpByLevel(amount.byLevel, ctx.level);
+  } else {
+    const rankIndex = Math.max(0, Math.min(ctx.abilityRank - 1, amount.byRank.length - 1));
+    total = amount.byRank[rankIndex] ?? 0;
+  }
+  for (const s of amount.scalings) {
+    total += scalingTerm(s.stat, s.ratio, ctx, target);
+  }
+  return total;
 }
 
 /** Apply the appropriate resistance based on the ability's damage type. */
@@ -50,7 +124,7 @@ export function mitigatedAbilityDamage(
   ctx: DamageContext,
   target: TargetContext,
 ): number {
-  const raw = rawAbilityDamage(ability, ctx);
+  const raw = rawAbilityDamage(ability, ctx, target);
   switch (ability.damageType) {
     case "physical":
       return raw * resistMultiplier(target.armor);

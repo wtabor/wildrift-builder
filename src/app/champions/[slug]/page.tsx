@@ -8,7 +8,7 @@ import { statRows } from "@/lib/statDisplay";
 import { championIconUrl } from "@/lib/visual";
 import { breadcrumbLd, championDescription, championPath, referenceLd } from "@/lib/seo";
 import { JsonLd, PageShell } from "@/app/_components/PageShell";
-import type { Champion } from "@/lib/schema";
+import type { AbilityAmount, Champion } from "@/lib/schema";
 
 /** Fully static: 140 pages emitted at build, no runtime data fetching. */
 export function generateStaticParams() {
@@ -56,6 +56,21 @@ function round(n: number): string {
   return Number.isInteger(r) ? String(r) : r.toFixed(2).replace(/0$/, "");
 }
 
+/**
+ * Render a heal/shield amount, which Wild Rift expresses either per ability
+ * rank ("100 / 160 / 220 / 280") or interpolated across champion level
+ * ("20 → 50"), plus any ratios on top ("+50% abilityPower").
+ */
+function amountLabel(a: AbilityAmount): string {
+  const base = a.byLevel
+    ? `${a.byLevel[0]} → ${a.byLevel[1]}`
+    : a.byRank.length > 0
+      ? a.byRank.join(" / ")
+      : "";
+  const ratios = a.scalings.map((s) => `+${Math.round(s.ratio * 100)}% ${s.stat}`);
+  return [base, ...ratios].filter(Boolean).join("  ");
+}
+
 const KIND_LABEL: Record<string, string> = {
   optimal: "Optimal build",
   damage: "Max damage build",
@@ -80,10 +95,6 @@ export default async function ChampionPage({ params }: Props) {
   const c = getChampion(slug);
   if (!c) notFound();
 
-  // computeBuild with no items gives the champion's own totals AND resolves
-  // attack speed properly. `championBaseAtLevel().attackSpeed` is the *bonus
-  // ratio* (+47%), not attacks/sec — reading it as a final value understates
-  // level 15 as lower than level 1.
   // Covers every stat the base-stats table renders (the growth rows plus the
   // flat move-speed row), so the "last changed" line under it speaks for the
   // whole table instead of whichever single row we happened to sample.
@@ -92,6 +103,10 @@ export default async function ChampionPage({ params }: Props) {
     "moveSpeed",
   ]);
 
+  // computeBuild with no items gives the champion's own totals AND resolves
+  // attack speed properly. `championBaseAtLevel().attackSpeed` is the *bonus
+  // ratio* (+47%), not attacks/sec — reading it as a final value understates
+  // level 15 as lower than level 1.
   const at1 = computeBuild(c, 1, []);
   const at15 = computeBuild(c, MAX_LEVEL, []);
   const lvl1 = at1.stats;
@@ -363,6 +378,36 @@ export default async function ChampionPage({ params }: Props) {
                       </dd>
                     </div>
                   ))}
+                  {/* Fields the schema gained so patch rolls stop dropping
+                      shields, heals and costs. Each renders only once a roll has
+                      transcribed it — absent means "not yet recorded", which is
+                      why these are `.optional()` rather than defaulted. */}
+                  {a.cost && a.cost.length > 0 && (
+                    <div className="flex gap-2">
+                      <dt>{c.resourceType === "none" ? "COST" : c.resourceType.toUpperCase()}</dt>
+                      <dd className="text-[#f5f6f8]">{a.cost.join(" / ")}</dd>
+                    </div>
+                  )}
+                  {a.heal && (
+                    <div className="flex gap-2">
+                      <dt>HEAL</dt>
+                      <dd className="text-[#f5f6f8]">{amountLabel(a.heal)}</dd>
+                    </div>
+                  )}
+                  {a.shield && (
+                    <div className="flex gap-2">
+                      <dt>SHIELD</dt>
+                      <dd className="text-[#f5f6f8]">{amountLabel(a.shield)}</dd>
+                    </div>
+                  )}
+                  {a.damageReduction && a.damageReduction.length > 0 && (
+                    <div className="flex gap-2">
+                      <dt>DMG REDUCTION</dt>
+                      <dd className="text-[#f5f6f8]">
+                        {a.damageReduction.map((d) => `${Math.round(d * 100)}%`).join(" / ")}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               </article>
             ))}

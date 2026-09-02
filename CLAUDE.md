@@ -43,6 +43,21 @@ Before committing, the gate is: `typecheck` + `test` + `validate-data` + `build`
   `upgradesFrom`, and get no gold-efficiency readout — they can't be bought, and their stat line
   includes stacked mana that was never paid for. `validate-data` fails the gate on an unresolvable
   `upgradesFrom`, an upgrade outside its base item's group, or a curated preset holding two members.
+- **A patch roll must not silently drop a change.** Rolls used to be recorded "PARTIAL" because the
+  ability schema had nowhere to put most of Riot's balance levers (7.2a applied 4 of 18 changes,
+  7.2b 15 of 24). `AbilitySchema` now carries `cost`, `heal`, `shield`, `grants`, `damageReduction`,
+  `baseDamageByLevel`, and target-relative scalings (`targetMaxHealth` / `targetCurrentHealth` /
+  `targetMissingHealth`) — so shields, heals, ability costs, %-target-health damage and level-scaled
+  passives are all representable. Check these before recording anything as unmodellable; see
+  ROSTER.md "Ability schema extension" for what genuinely still isn't (form variants, per-stack
+  terms, runes).
+- **New ability fields are `.optional()`, never `.default()`.** Frozen snapshots (`7.1`, `7.2`,
+  `7.2a`) are validated by the *same* schema, so a required field breaks ~700 records at once — and
+  a default would make "not transcribed yet" indistinguishable from "genuinely has none". Widening
+  an enum is safe; narrowing one is not (see the `enchant` note on `ItemSchema.slot`).
+- **A situational buff belongs in `abilities[].grants`, never in `item.stats`.** `item.stats` feeds
+  `computeBuild`, `statRows`, `goldEfficiency` and the analysis findings, so putting a conditional
+  passive there silently moves displayed Armor/MR and that item's gold-efficiency percentage.
 
 ## Architecture
 
