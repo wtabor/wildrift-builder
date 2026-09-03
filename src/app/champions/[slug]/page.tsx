@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { champions, getBuilds, getChampion, getItem, CURRENT_PATCH, provenanceFor } from "@/lib/data";
+import { champions, getBuilds, getChampion, getItem, CURRENT_PATCH, latestProvenanceStamp } from "@/lib/data";
 import { computeBuild, MAX_LEVEL } from "@/lib/stats/engine";
 import { formatGold } from "@/lib/format";
 import { statRows } from "@/lib/statDisplay";
 import { championIconUrl } from "@/lib/visual";
 import { breadcrumbLd, championDescription, championPath, referenceLd } from "@/lib/seo";
 import { JsonLd, PageShell } from "@/app/_components/PageShell";
-import type { Champion } from "@/lib/schema";
+import type { AbilityAmount, Champion } from "@/lib/schema";
 
 /** Fully static: 140 pages emitted at build, no runtime data fetching. */
 export function generateStaticParams() {
@@ -56,6 +56,21 @@ function round(n: number): string {
   return Number.isInteger(r) ? String(r) : r.toFixed(2).replace(/0$/, "");
 }
 
+/**
+ * Render a heal/shield amount, which Wild Rift expresses either per ability
+ * rank ("100 / 160 / 220 / 280") or interpolated across champion level
+ * ("20 → 50"), plus any ratios on top ("+50% abilityPower").
+ */
+function amountLabel(a: AbilityAmount): string {
+  const base = a.byLevel
+    ? `${a.byLevel[0]} → ${a.byLevel[1]}`
+    : a.byRank.length > 0
+      ? a.byRank.join(" / ")
+      : "";
+  const ratios = a.scalings.map((s) => `+${Math.round(s.ratio * 100)}% ${s.stat}`);
+  return [base, ...ratios].filter(Boolean).join("  ");
+}
+
 const KIND_LABEL: Record<string, string> = {
   optimal: "Optimal build",
   damage: "Max damage build",
@@ -79,6 +94,14 @@ export default async function ChampionPage({ params }: Props) {
   const { slug } = await params;
   const c = getChampion(slug);
   if (!c) notFound();
+
+  // Covers every stat the base-stats table renders (the growth rows plus the
+  // flat move-speed row), so the "last changed" line under it speaks for the
+  // whole table instead of whichever single row we happened to sample.
+  const baseStatPatch = latestProvenanceStamp(c.provenance, [
+    ...GROWTH_ROWS.map((r) => r.key),
+    "moveSpeed",
+  ]);
 
   // computeBuild with no items gives the champion's own totals AND resolves
   // attack speed properly. `championBaseAtLevel().attackSpeed` is the *bonus
@@ -209,7 +232,13 @@ export default async function ChampionPage({ params }: Props) {
         </table>
       </div>
       <p className="mt-3 font-mono text-[11px] tracking-wider text-[#8b8f9a]">
-        BASE STATS LAST CHANGED: PATCH {provenanceFor(c.provenance, "maxHealth")}
+        {/* Summarises the WHOLE table, so it has to consider every base-stat key
+            — keying off maxHealth alone reported "no change" for a champion
+            whose armor moved this patch. Unstamped values are carried forward,
+            not changed, so they get the weaker wording. See provenanceFor. */}
+        {baseStatPatch
+          ? `BASE STATS LAST CHANGED: PATCH ${baseStatPatch}`
+          : `BASE STATS: NO CHANGE ON RECORD — ACCURATE AS OF PATCH ${CURRENT_PATCH}`}
       </p>
 
       {/* ── Level 15 summary ──────────────────────────────────────────── */}
@@ -349,6 +378,36 @@ export default async function ChampionPage({ params }: Props) {
                       </dd>
                     </div>
                   ))}
+                  {/* Fields the schema gained so patch rolls stop dropping
+                      shields, heals and costs. Each renders only once a roll has
+                      transcribed it — absent means "not yet recorded", which is
+                      why these are `.optional()` rather than defaulted. */}
+                  {a.cost && a.cost.length > 0 && (
+                    <div className="flex gap-2">
+                      <dt>{c.resourceType === "none" ? "COST" : c.resourceType.toUpperCase()}</dt>
+                      <dd className="text-[#f5f6f8]">{a.cost.join(" / ")}</dd>
+                    </div>
+                  )}
+                  {a.heal && (
+                    <div className="flex gap-2">
+                      <dt>HEAL</dt>
+                      <dd className="text-[#f5f6f8]">{amountLabel(a.heal)}</dd>
+                    </div>
+                  )}
+                  {a.shield && (
+                    <div className="flex gap-2">
+                      <dt>SHIELD</dt>
+                      <dd className="text-[#f5f6f8]">{amountLabel(a.shield)}</dd>
+                    </div>
+                  )}
+                  {a.damageReduction && a.damageReduction.length > 0 && (
+                    <div className="flex gap-2">
+                      <dt>DMG REDUCTION</dt>
+                      <dd className="text-[#f5f6f8]">
+                        {a.damageReduction.map((d) => `${Math.round(d * 100)}%`).join(" / ")}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               </article>
             ))}

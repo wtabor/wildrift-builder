@@ -1,6 +1,6 @@
 "use client";
 
-import { getPatchInfo, provenanceFor } from "@/lib/data";
+import { getPatchInfo, hasProvenanceStamp, provenanceFor } from "@/lib/data";
 import { formatPatchDate } from "@/lib/format";
 import type { Provenance } from "@/lib/schema";
 
@@ -34,7 +34,7 @@ export function ProvenanceTooltip({
   valueKey: string;
   children: React.ReactNode;
 }) {
-  const hasStamp = provenance?.[valueKey] !== undefined;
+  const hasStamp = hasProvenanceStamp(provenance, valueKey);
   const version = provenanceFor(provenance, valueKey);
   const info = getPatchInfo(version);
 

@@ -100,13 +100,64 @@ export function getPatchInfo(version: string | undefined): PatchInfo | undefined
 }
 
 /**
- * Resolve the patch a single displayed value last changed in. Falls back to the
- * dataset baseline (CURRENT_PATCH) when an entity carries no explicit stamp for
- * that key — so an unstamped dataset still reads as "verified against current".
+ * Resolve the patch to cite for a single displayed value. Returns the explicit
+ * stamp when the entity carries one, else falls back to the dataset baseline
+ * (CURRENT_PATCH).
+ *
+ * IMPORTANT: the fallback means "carried forward unchanged, accurate as of this
+ * patch" — it is NOT a record that the value changed in that patch. Most of the
+ * dataset is unstamped (stamps are sparse by design), so a caller that renders
+ * this as "last changed" turns silence into a freshness claim the data does not
+ * support. Always branch on `hasProvenanceStamp` before choosing that wording.
  */
 export function provenanceFor(
   provenance: Provenance | undefined,
   key: string,
 ): string {
   return provenance?.[key] ?? CURRENT_PATCH;
+}
+
+/**
+ * Whether a value carries an EXPLICIT provenance stamp, as opposed to falling
+ * back to the dataset baseline. The single source of truth for the "did this
+ * actually change?" question — every surface that words a patch citation
+ * ("last changed" vs "no change on record") must gate on this, so the honest
+ * wording can never drift apart between the calculator and the reference pages.
+ */
+export function hasProvenanceStamp(
+  provenance: Provenance | undefined,
+  key: string,
+): boolean {
+  return provenance?.[key] !== undefined;
+}
+
+/**
+ * The newest explicit stamp across `keys`, or undefined when none of them carry
+ * one. Use this for a summary line that stands for a GROUP of values (a whole
+ * stat table) rather than a single number: picking one representative key
+ * reports "no change on record" whenever some *other* value in the group is the
+ * one that actually moved this patch.
+ *
+ * Ordered by the registry's release dates, not by comparing version strings —
+ * "7.2b" happens to sort after "7.2", but "7.10" would sort before "7.2".
+ * Unregistered versions sort oldest so a known date always wins.
+ */
+export function latestProvenanceStamp(
+  provenance: Provenance | undefined,
+  keys: readonly string[],
+): string | undefined {
+  let newest: string | undefined;
+  let newestDate = "";
+
+  for (const key of keys) {
+    const version = provenance?.[key];
+    if (version === undefined) continue;
+    const date = patchRegistry[version]?.date ?? "";
+    if (newest === undefined || date > newestDate) {
+      newest = version;
+      newestDate = date;
+    }
+  }
+
+  return newest;
 }

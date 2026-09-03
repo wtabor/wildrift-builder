@@ -574,3 +574,103 @@ reference-only design.
 - **Ring of Revelation** stays excluded. Riot's 7.2 notes rewrote Archangel's
   build path from `Ring of Revelation` to `Fiendish Codex`, which is
   consistent with it no longer mattering; not re-investigated here.
+
+## Ability schema extension (2026-08-27) — why rolls were always PARTIAL
+
+Every roll since 7.2 was recorded as a PARTIAL roll for the same reason, and the
+reason was never examined: **7.2a applied 4 of 18 documented changes, 7.2b 15 of
+24 — 19 of 42 (45%)**. A re-audit of all 20 "not applied" rows against the real
+schema and the real records establishes that this was a **data-model ceiling**,
+but also that the ROSTER framing of it was **wrong on 5 of the 20 rows**.
+
+### ROSTER was wrong: 3 of the 20 were DATA gaps, not schema gaps
+
+These need **no schema work at all** — the schema could always express them and
+the champion record simply left the field empty. `AbilityScalingSchema` has
+always allowed `abilityPower` / `bonusAttackDamage`, `slot: "passive"` has always
+been legal, and **Darius' Hemorrhage is a live in-dataset example of a passive
+carrying `scalings`** (1 of 140 champions does it).
+
+| Entity | Change | ROSTER said | Actually |
+| --- | --- | --- | --- |
+| Warwick | passive Eternal Hunger bonus-AD ratio `20%` → `15%` | "passive has no `scalings`" | **DATA gap** — record has `scalings: []` while its own description reads "(+ 20% bonus AD)" |
+| Warwick | Q Jaws of the Beast AP ratio `90%` → `85%` | "Q has no AP scaling modelled" | **DATA gap** — `abilityPower` is used by 100+ other abilities |
+| Ekko | passive Z-Drive Resonance AP ratio `70%` → `80%` | "passive has no `scalings`" | **DATA gap** — `damageType` is *already* `magic`; only `scalings` is empty |
+
+### ROSTER had the right verdict for the wrong reason: 2 more rows
+
+- **Skarner Q** — "max-health damage not modelled" is false; Gnar E already
+  carries `{stat: "maxHealth", ratio: 0.06}`. The real blocker was that
+  `maxHealth` resolves against the **attacker**, while the ability text is "% of
+  the **target's** maximum health". Storable all along — and silently wrong.
+- **Nidalee R** — "R has no `scalings`" is false. `scalings` is a *damage* ratio;
+  putting `0.025` there would have rendered an armor/MR conversion as damage.
+  The real gap was that no field linked an ability to the stats it grants.
+
+### What was added
+
+Six capabilities, chosen because each unblocks specific recorded changes. All
+fields are `.optional()` — never `.default()` — for two reasons: the frozen
+snapshots (7.1, 7.2, 7.2a) are validated by this same schema, so a required
+field would break ~700 ability records at once; and a default would make "nobody
+transcribed this yet" indistinguishable from "this ability genuinely has none".
+
+| Capability | Unblocks | Recorded changes |
+| --- | --- | --- |
+| `heal` / `shield` (`AbilityAmountSchema`) | Skarner W, Senna R, Yuumi R, Sona W, Kayle W, Lee Sin W | **6** |
+| `grants` (a `StatBlock` the ability confers) | Nidalee R, Nidalee Prowl, Hecarim Q, Lee Sin W omnivamp | **4** |
+| `targetMaxHealth` / `targetCurrentHealth` / `targetMissingHealth` scalings | Skarner Q, Senna passive, Ambessa R, Ekko W | **4** |
+| `cost` (resource per rank) | Yuumi E, Kayle Q, Kayle W | **3** |
+| `byLevel` / `baseDamageByLevel` interpolation | Senna passive, Lee Sin W omnivamp range | **2** |
+| `damageReduction` | Ambessa R | **1** |
+
+`grants` reuses `StatBlockSchema` rather than inventing new stat vocabulary —
+`moveSpeedPercent`, `omnivamp`, `armor` and `magicResist` were already keys. It
+is deliberately **not** summed by `computeBuild`: a buff that applies only while
+an ability is active is not part of a champion's standing totals, and writing one
+into `item.stats` instead would move displayed Armor/MR **and** that item's gold
+efficiency. That mistake is what the field exists to prevent.
+
+### Still not modelled
+
+- **Form/transform ability variants** (Nidalee cougar form). Duplicate `slot`
+  values parse, but both consumers key by slot — `AerstrikeDesign` builds a
+  `Map` (last wins) and the champion page uses `key={a.slot}` — so it needs a
+  discriminator plus consumer changes. Latent scope is wider than the one
+  recorded change: Nidalee E, Skarner Q, Ambessa Q and Lee Sin recasts are all
+  half-modelled today.
+- **Per-stack terms** (Senna R's `+2.5/stack`). 24 item effects carry a stack cap.
+- **Runes** — no `RuneSchema` and no `runes.json`; a whole missing entity type,
+  not a field. Blocks the Botanist change.
+- **Champion bounty** — a global economy rule with no per-entity home.
+
+### Two latent accuracy bugs found, deliberately NOT fixed here
+
+Both are wrong in shipped data today. Neither is user-visible yet, because
+`rawAbilityDamage` is exported but **never called** — grep finds no import site.
+They will produce wrong numbers the moment Phase 3 wires it up.
+
+- **Gnar E** carries `{stat: "maxHealth", ratio: 0.06}`, computing 6% of *Gnar's*
+  max health. The description ("based on max health") does not say whose. It is
+  the only `maxHealth` ability scaling in the entire dataset.
+- **Warwick Q** carries `baseDamage: [6, 7, 8, 9]`, which appear to be Riot's
+  %-target-max-health figures stored as flat damage — so the engine would add a
+  literal 6–9 damage.
+
+Both need a primary source to resolve, and every Wild Rift source domain
+(`wildrift.leagueoflegends.com`, `wildriftfire.com`, `wiki.leagueoflegends.com`,
+`riftgg.app`) is blocked from the environment this audit ran in. Changing a
+shipped value on an unverified reading would be exactly the failure this
+project's source-priority rule exists to prevent, so they are recorded here
+instead. **Fix them in the same pass that applies the three DATA gaps above.**
+
+### Scale of what is still inert
+
+For context on how much room the extension leaves: **179 of 188 item effects
+(95%) carry no machine-readable `mechanic`** and are dead text to the engine,
+covering only 7 of 112 items. On the champion side, **26 abilities across 26
+champions are typed `damageType: "none"` while their own description says they
+deal physical/magic/true damage**, and **112 abilities have a damage type but
+zero scalings**. A future `validate-data` rule should flag a `none`-typed ability
+whose description matches `/deals? .* (physical|magic|true) damage/`, or the new
+fields get populated on top of a mistyped base.

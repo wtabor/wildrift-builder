@@ -55,6 +55,84 @@ for (const dir of patches) {
   let items: Item[] = [];
   check("champions.json", () => {
     champions = ChampionsFileSchema.parse(loadJson(join(base, "champions.json")));
+
+    // Ability-level consistency. Every check below is PRESENCE-CONDITIONAL —
+    // it fires only when the optional field is actually populated — because the
+    // frozen snapshots (7.1, 7.2, 7.2a) are validated by this same schema and
+    // predate these fields entirely. A check that required presence would break
+    // ~700 ability records at once, which is the same trap a required schema
+    // field would spring.
+    const errors: string[] = [];
+    for (const c of champions) {
+      for (const a of c.abilities) {
+        const where = `"${c.id}" ${a.slot} "${a.name}"`;
+
+        // A per-rank array shorter than the ability's ranks silently clamps in
+        // rawAbilityDamage (Math.min(rank-1, length-1)), so rank 4 would read
+        // rank 3's number rather than failing.
+        const ranks = a.baseDamage.length || a.cooldown.length;
+        if (a.cost && ranks && a.cost.length !== ranks) {
+          errors.push(
+            `${where}: cost has ${a.cost.length} ranks but the ability has ${ranks} ` +
+              `— the last rank would silently reuse an earlier value`,
+          );
+        }
+
+        // A resource cost a champion can never pay.
+        if (a.cost?.length && c.resourceType === "none") {
+          errors.push(
+            `${where}: has a resource cost but the champion's resourceType is "none" ` +
+              `— the cost can never be paid`,
+          );
+        }
+
+        // Every ratio in this codebase is a 0..1 fraction (moveSpeedPercent
+        // 0.05 = +5%). A transcriber writing "8" for 8% inflates the term 100x,
+        // and nothing downstream would notice.
+        for (const s of a.scalings) {
+          if (Math.abs(s.ratio) > 10) {
+            errors.push(
+              `${where}: scaling ${s.stat} ratio ${s.ratio} is not a 0..1 fraction — 8% is 0.08, not 8`,
+            );
+          }
+        }
+        for (const [field, amount] of [["heal", a.heal], ["shield", a.shield]] as const) {
+          if (!amount) continue;
+          for (const s of amount.scalings) {
+            if (Math.abs(s.ratio) > 10) {
+              errors.push(
+                `${where}: ${field} scaling ${s.stat} ratio ${s.ratio} is not a 0..1 fraction — 50% is 0.5, not 50`,
+              );
+            }
+          }
+          // A half-transcribed entry: the name and description landed, the
+          // numbers never did, so the value can only ever compute to 0.
+          const hasAmount =
+            amount.byRank.some((n) => n !== 0) || amount.byLevel || amount.scalings.length > 0;
+          if (!hasAmount) {
+            errors.push(`${where}: declares a ${field} with no amount and no scalings — it can only compute to 0`);
+          }
+        }
+
+        // Damage reduction is a 0..1 fraction of incoming damage; >= 1 would
+        // mean total immunity, which no Wild Rift ability grants.
+        for (const dr of a.damageReduction ?? []) {
+          if (dr < 0 || dr >= 1) {
+            errors.push(`${where}: damageReduction ${dr} is outside 0..1 — 30% is 0.3`);
+          }
+        }
+
+        // Level-interpolated and per-rank damage are alternatives, not a pair;
+        // rawAbilityDamage reads byLevel and ignores baseDamage when both exist.
+        if (a.baseDamageByLevel && a.baseDamage.length) {
+          errors.push(
+            `${where}: has both baseDamageByLevel and baseDamage — they are alternatives, ` +
+              `and baseDamage would be silently ignored`,
+          );
+        }
+      }
+    }
+    if (errors.length) throw new Error(errors.join("\n    "));
   });
   check("items.json", () => {
     items = ItemsFileSchema.parse(loadJson(join(base, "items.json")));

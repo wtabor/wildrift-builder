@@ -43,6 +43,21 @@ Before committing, the gate is: `typecheck` + `test` + `validate-data` + `build`
   `upgradesFrom`, and get no gold-efficiency readout — they can't be bought, and their stat line
   includes stacked mana that was never paid for. `validate-data` fails the gate on an unresolvable
   `upgradesFrom`, an upgrade outside its base item's group, or a curated preset holding two members.
+- **A patch roll must not silently drop a change.** Rolls used to be recorded "PARTIAL" because the
+  ability schema had nowhere to put most of Riot's balance levers (7.2a applied 4 of 18 changes,
+  7.2b 15 of 24). `AbilitySchema` now carries `cost`, `heal`, `shield`, `grants`, `damageReduction`,
+  `baseDamageByLevel`, and target-relative scalings (`targetMaxHealth` / `targetCurrentHealth` /
+  `targetMissingHealth`) — so shields, heals, ability costs, %-target-health damage and level-scaled
+  passives are all representable. Check these before recording anything as unmodellable; see
+  ROSTER.md "Ability schema extension" for what genuinely still isn't (form variants, per-stack
+  terms, runes).
+- **New ability fields are `.optional()`, never `.default()`.** Frozen snapshots (`7.1`, `7.2`,
+  `7.2a`) are validated by the *same* schema, so a required field breaks ~700 records at once — and
+  a default would make "not transcribed yet" indistinguishable from "genuinely has none". Widening
+  an enum is safe; narrowing one is not (see the `enchant` note on `ItemSchema.slot`).
+- **A situational buff belongs in `abilities[].grants`, never in `item.stats`.** `item.stats` feeds
+  `computeBuild`, `statRows`, `goldEfficiency` and the analysis findings, so putting a conditional
+  passive there silently moves displayed Armor/MR and that item's gold-efficiency percentage.
 
 ## Architecture
 
@@ -63,7 +78,7 @@ never re-implement formatting in a component. See `DESIGN_WORKFLOW.md` for UI it
 
 - Adding/updating champions or items: use the `/add-entity` skill — it bundles the schema shape,
   source-priority rule, and the validate gate.
-- Roster is already complete (139 champions / 100 items); new work is patch updates and corrections,
+- Roster is already complete (140 champions / 112 items as of 7.2b); new work is patch updates and corrections,
   not initial fill. Roster progress tracked in `ROSTER.md`.
 - Three Claude-driven GitHub Actions keep data honest and current: `data-verify.yml` (daily audit →
   corrections PR), `patch-watch.yml` (daily → rolls the dataset forward one patch per PR toward the
