@@ -466,6 +466,45 @@ Description-only edit (no engine effect): Luden's Echo `Discordic Echo`
 - **Botanist rune** (plant gold 30 → 10) — there is no runes data file at all.
 - **Champion bounty system** (bounty gold rates) — no data file; not modelled.
 
+## Patches 7.2c/7.2d/7.2e (2026-09-11) — registry only, data NOT rolled forward
+
+Riot has shipped three more hotfixes since 7.2b: **7.2c** (2026-08-12, 9
+champions / 10 items), **7.2d** (2026-08-26, 13 champions / 2 items), and
+**7.2e** (2026-09-09, 5 champions / 4 items) — so the live game is now three
+hotfixes ahead of the shipped dataset. Their dates and notes URLs are recorded
+in `data/patches/registry.json`, but `champions.json`/`items.json` were **not**
+rolled forward and `CURRENT_PATCH` stays `7.2b`.
+
+Reason: every primary/secondary source domain this project's source-priority
+rule requires (`wildrift.leagueoflegends.com`, `wildriftfire.com`,
+`riftgg.app`, `wiki.leagueoflegends.com`) was unreachable via direct fetch in
+this session's environment — the same `EGRESS_BLOCKED` condition already
+recorded under "Two latent accuracy bugs found" above. Search-engine summaries
+were reachable, but demonstrably unreliable at the per-patch-per-value level
+this project needs: one query round attributed the same Mikael's Blessing
+change to 7.2c, a second attributed it to 7.2d, in the same session. Writing
+either into a schema-stamped `provenance` entry would silently corrupt the
+record it's meant to protect, so per CLAUDE.md's "never guess" rule, no
+champion/item values were changed. This should be finished by hand (or by
+`patch-watch`) once `WebFetch`/`Bash(curl)` can reach the primary sources —
+one hotfix per PR, oldest first (7.2c, then 7.2d, then 7.2e), same as every
+prior roll in this document.
+
+**Jhin is unaffected by all three hotfixes.** Cross-checked two ways:
+1. Champion-change rosters for 7.2c (Cho'Gath, Jinx, Nilah, Nasus, Ryze,
+   Warwick, Kog'Maw, Leona, Rumble), 7.2d (Caitlyn, Fiora, Mordekaiser,
+   Renekton, Syndra, Veigar, Vladimir, Yuumi, Gwen, Pantheon, Thresh, Twisted
+   Fate, Yone), and 7.2e (Vi, Swain, Janna, Nautilus, Malphite) never name Jhin,
+   and none of the touched items (Sunfire Aegis, Stridebreaker, Mikael's
+   Blessing, Kaenic Rookern, Berserker's Greaves, Plated Steelcaps, Mercury's
+   Treads, Eclipse, Unending Despair, Verdant Barrier) are core Jhin items.
+2. WildRiftFire's own Jhin guide, re-fetched live at **Patch 7.2e**, lists the
+   exact same six-item build already curated in `data/patches/7.2b/builds.json`
+   as `jhin-optimal` — The Collector → Galeforce → Lord Dominik's Regards →
+   Magnetic Blaster → Infinity Edge, Gluttonous Greaves boots — so the shipped
+   build recommendation for Jhin is current even though the dataset's patch
+   stamp is not.
+
 ## Correction: the Tear line really was missing (2026-08-06)
 
 Hand-run backfill (the `data-verify` / `patch-watch` workflows are disabled —
